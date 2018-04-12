@@ -1,0 +1,130 @@
+---
+- name: terminals setup
+  hosts: 192.168.192.168
+
+  vars:
+    ZabbixServer: 192.168.255.255
+
+  tasks:
+
+
+  - name: Fusioninventory install dependecies
+    apt: name={{item}} state=present update_cache=yes
+    with_items:
+      - dmidecode
+      - hwdata
+      - ucf
+      - hdparm
+      - perl
+      - libuniversal-require-perl
+      - libwww-perl
+      - libparse-edid-perl
+      - libproc-daemon-perl
+      - libfile-which-perl
+      - libxml-treepp-perl
+      - libyaml-perl
+      - libnet-cups-perl
+      - libnet-ip-perl
+      - libdigest-sha-perl
+      - libsocket-getaddrinfo-perl
+      - libtext-template-perl
+    become: true
+  - name: Fusioninventiry install
+    apt: deb='http://debian.fusioninventory.org/downloads/fusioninventory-agent_2.4-2_all.deb'
+    become: true
+  - name: Fusioninventiry setup agent
+    replace: dest=/etc/fusioninventory/agent.cfg regexp={{item.regexp}} replace={{item.replace}}
+    with_items:
+      - { regexp: '^MODE=cron.*', replace: 'MODE=daemon' }
+      - { regexp: '^#server =.*', replace: 'server = http://glpi.domain.com/plugins/fusioninventory/' }
+    become: true
+
+  - name: install bash,wget,mc,rdesktop
+    apt: name={{item}} state=present
+    with_items:
+      - 'mc'
+      - 'rdesktop'
+      - 'xvkbd'
+      - 'util-linux'
+      - 'x11vnc'
+      - 'zabbix-agent'
+      - 'fusioninventory-agent'
+      - 'screen'
+    become: true
+
+  - name: setup x11vnc
+    command: x11vnc -storepasswd VNCPASSWORD /etc/x11vnc.pass
+    become: true
+
+  - name: x11vnc init
+    blockinfile:
+      dest: /lib/systemd/system/x11vnc.service
+      block: |
+         [Unit]
+         Description=Start x11vnc at startup.
+         After=multi-user.target
+         [Service]
+         Type=simple
+         ExecStart=/usr/bin/x11vnc -auth guess -forever -loop -noxdamage -repeat -rfbauth /etc/x11vnc.pass -rfbport 5900 -shared
+         [Install]
+         WantedBy=multi-user.target
+      create: yes
+    become: true
+
+  - name: start x11vnc
+    service: name=x11vnc enabled=yes state=started
+    become: true
+
+  - name: setup zabbix agent
+    replace: dest={{item.dest}} regexp={{item.regexp}} replace={{item.replace}}
+    with_items:
+      - { dest: '/etc/zabbix/zabbix_agentd.conf', regexp: '^ServerActive=.*', replace: 'Server={{ZabbixServer}}' }
+      - { dest: '/etc/zabbix/zabbix_agentd.conf', regexp: '^Server=.*', replace: 'Server={{ZabbixServer}}' }
+      - { dest: '/etc/zabbix/zabbix_agentd.conf', regexp: '^Hostname.*', replace: '#Hostname=' }
+    become: true
+
+  - name: User terminal create with password terminal
+    user: name=terminal password='$6$caXc4K5Y$lYQ.CQv2t2ZKghlVcHHdjknHvTbOvRTvbs28hsRT1ScgGk5hYb9lSF0bFUJ66i8zxg04PZV7sopaEKtB1AsBV/' shell=/bin/bash
+    become: true
+
+  - name: XFCE autologin setup
+    replace: dest='/etc/lightdm/lightdm.conf' regexp='autologin-user=*' replace='autologin-user=terminal'
+    become: true
+
+  - name: Start.sh copy
+    copy: src=../template/start.sh dest=/usr/bin/start.sh
+    become: true
+  - name: Start.sh mode
+    file: path=/usr/bin/start.sh mode='u=rwx,g=rx,o=rx'
+    become: true
+  - name: terminal.py copy
+    copy: src=../template/terminal.py dest=/usr/bin/terminal.py
+    become: true
+  - name: terminal.py mode
+    file: path=/usr/bin/terminal.py mode='u=rwx,g=rx,o=rx'
+    become: true
+  - name: Creates autostart directory
+    file: path=/home/terminal/.config/autostart state=directory owner=terminal group=terminal mode=0775
+    become: true
+  - name: Copy autostart for start.sh
+    copy: src=../template/xfce4autostart dest=/home/terminal/.config/autostart/start.sh.desktop
+    become: true
+
+  - name: Copy warrning.png
+    copy: src=../template/warrning.png dest=/home/terminal/warrning.png
+    become: true
+  - name: Background settings
+    replace: dest='/home/terminal/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml' regexp='value="/usr/share/xfce4/backdrops/xubuntu-wallpaper.png"/>' replace='value="/home/terminal/warrning.png"/>'
+    become: true
+
+
+
+  - name: Disable monitor power save
+    lineinfile: dest='/home/terminal/.xinitrc'
+                insertafter='\*\)'
+                line="\t\t{{item}}"
+                state=present
+                create=yes
+    with_items:
+      - 'xset -dpms'
+    become: true
